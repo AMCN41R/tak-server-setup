@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-source ./.env
+[ -f ./.env ] && source ./.env
 
 # Optional: the address clients/browsers will actually use to reach this server
 # (public IP, private IP, or DNS name). TAK Server auto-detects its own Docker
@@ -176,8 +176,13 @@ ADMIN_PASSWORD="${ADMIN_USER_PASSWORD:-$(generate_password 15)}"
 $DOCKER_COMPOSE exec tak bash -c "sed -i 's/password=\"\"/password=\"$MARTI_PASSWORD\"/g' /opt/tak/CoreConfig.xml"
 
 # update cert-metadata.sh with configured values. Fallback to US if variable not set.
-$DOCKER_COMPOSE exec tak bash -c "sed -i -e 's/COUNTRY=US/COUNTRY=${COUNTRY:-US}/' /opt/tak/certs/cert-metadata.sh"
-$DOCKER_COMPOSE exec tak bash -c "sed -i -e 's/ORGANIZATIONAL_UNIT=US/ORGANIZATIONAL_UNIT=${ORGANIZATIONAL_UNIT:-TAK}/' /opt/tak/certs/cert-metadata.sh"
+$DOCKER_COMPOSE exec tak bash -c "sed -i -E 's/^COUNTRY=.*/COUNTRY=\"${COUNTRY:-US}\"/' /opt/tak/certs/cert-metadata.sh"
+$DOCKER_COMPOSE exec tak bash -c "sed -i -E 's/^ORGANIZATION=.*/ORGANIZATION=\"${ORGANIZATION:-TAK}\"/' /opt/tak/certs/cert-metadata.sh"
+$DOCKER_COMPOSE exec tak bash -c "sed -i -E 's/^ORGANIZATIONAL_UNIT=.*/ORGANIZATIONAL_UNIT=\"${ORGANIZATIONAL_UNIT:-TAK}\"/' /opt/tak/certs/cert-metadata.sh"
+$DOCKER_COMPOSE exec tak bash -c "sed -i -E 's/^STATE=.*/STATE=\"${STATE:-VA}\"/' /opt/tak/certs/cert-metadata.sh"
+$DOCKER_COMPOSE exec tak bash -c "sed -i -E 's/^CITY=.*/CITY=\"${CITY:-Fort Belvoir}\"/' /opt/tak/certs/cert-metadata.sh"
+$DOCKER_COMPOSE exec tak bash -c "sed -i -E 's/^CAPASS=.*/CAPASS=\"${CAPASS:-atakatak}\"/' /opt/tak/certs/cert-metadata.sh"
+$DOCKER_COMPOSE exec tak bash -c "sed -i -E 's/^PASS=.*/PASS=\"${PASS:-atakatak}\"/' /opt/tak/certs/cert-metadata.sh"
 
 # restart the db container so it (re)creates martiuser using the new password from CoreConfig.xml and cert-metadata.sh.
 # The tak container will then pick up the new password on its next restart.
@@ -231,6 +236,9 @@ echo "CERTIFICATES"
 echo ""
 echo "  - Get the server and admin certs: sh ./get-certs.sh"
 echo "  - Create a client cert: sh ./create-client-cert.sh <client-name>"
+echo ""
+echo "  - CA Password: ${CAPASS:-atakatak}"
+echo "  - Admin Password: ${PASS:-atakatak}"
 echo ""
 echo "MANAGE"
 echo "  - Manage the stack with 'docker compose' commands, e.g. 'docker compose ps', 'docker compose logs', 'docker compose down'"
