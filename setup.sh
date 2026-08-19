@@ -121,7 +121,7 @@ generate_password() {
   local upper='ABCDEFGHIJKLMNOPQRSTUVWXYZ'
   local lower='abcdefghijklmnopqrstuvwxyz'
   local digit='0123456789'
-  local special='-_.~+'
+  local special='_.~+-'
   local all="${upper}${lower}${digit}${special}"
 
   local password=""
@@ -149,6 +149,17 @@ generate_password() {
   done
 
   echo "$password"
+}
+
+# Escapes $1 for safe use as sed replacement (RHS) text with delimiter $2 (default '/'),
+# so values from .env or CLI args (passwords, cert metadata, server address) can't break
+# or hijack the sed command even if they contain backslashes, ampersands, or the delimiter.
+sed_escape_repl() {
+  local s="$1" delim="${2:-/}"
+  s="${s//\\/\\\\}"
+  s="${s//$delim/\\$delim}"
+  s="${s//&/\\&}"
+  printf '%s' "$s"
 }
 
 # reset state as needed
@@ -186,16 +197,16 @@ RESOLVED_CAPASS="${CAPASS:-atakatak}"
 RESOLVED_PASS="${PASS:-atakatak}"
 
 # set martiuser password in tak/CoreConfig.xml
-$DOCKER_COMPOSE exec -T -e MARTI_PASSWORD="$MARTI_PASSWORD" tak bash -c 'sed -i "s/password=\"\"/password=\"$MARTI_PASSWORD\"/g" /opt/tak/CoreConfig.xml'
+$DOCKER_COMPOSE exec -T -e MARTI_PASSWORD="$(sed_escape_repl "$MARTI_PASSWORD" '/')" tak bash -c 'sed -i "s/password=\"\"/password=\"$MARTI_PASSWORD\"/g" /opt/tak/CoreConfig.xml'
 
 # update cert-metadata.sh with configured values
-$DOCKER_COMPOSE exec -T -e V="$RESOLVED_COUNTRY" tak bash -c 'sed -i -E "s/^COUNTRY=.*/COUNTRY=\"$V\"/" /opt/tak/certs/cert-metadata.sh'
-$DOCKER_COMPOSE exec -T -e V="$RESOLVED_ORGANIZATION" tak bash -c 'sed -i -E "s/^ORGANIZATION=.*/ORGANIZATION=\"$V\"/" /opt/tak/certs/cert-metadata.sh'
-$DOCKER_COMPOSE exec -T -e V="$RESOLVED_ORGANIZATIONAL_UNIT" tak bash -c 'sed -i -E "s/^ORGANIZATIONAL_UNIT=.*/ORGANIZATIONAL_UNIT=\"$V\"/" /opt/tak/certs/cert-metadata.sh'
-$DOCKER_COMPOSE exec -T -e V="$RESOLVED_STATE" tak bash -c 'sed -i -E "s/^STATE=.*/STATE=\"$V\"/" /opt/tak/certs/cert-metadata.sh'
-$DOCKER_COMPOSE exec -T -e V="$RESOLVED_CITY" tak bash -c 'sed -i -E "s/^CITY=.*/CITY=\"$V\"/" /opt/tak/certs/cert-metadata.sh'
-$DOCKER_COMPOSE exec -T -e V="$RESOLVED_CAPASS" tak bash -c 'sed -i -E "s/^CAPASS=.*/CAPASS=\"$V\"/" /opt/tak/certs/cert-metadata.sh'
-$DOCKER_COMPOSE exec -T -e V="$RESOLVED_PASS" tak bash -c 'sed -i -E "s/^PASS=.*/PASS=\"$V\"/" /opt/tak/certs/cert-metadata.sh'
+$DOCKER_COMPOSE exec -T -e V="$(sed_escape_repl "$RESOLVED_COUNTRY" '/')" tak bash -c 'sed -i -E "s/^COUNTRY=.*/COUNTRY=\"$V\"/" /opt/tak/certs/cert-metadata.sh'
+$DOCKER_COMPOSE exec -T -e V="$(sed_escape_repl "$RESOLVED_ORGANIZATION" '/')" tak bash -c 'sed -i -E "s/^ORGANIZATION=.*/ORGANIZATION=\"$V\"/" /opt/tak/certs/cert-metadata.sh'
+$DOCKER_COMPOSE exec -T -e V="$(sed_escape_repl "$RESOLVED_ORGANIZATIONAL_UNIT" '/')" tak bash -c 'sed -i -E "s/^ORGANIZATIONAL_UNIT=.*/ORGANIZATIONAL_UNIT=\"$V\"/" /opt/tak/certs/cert-metadata.sh'
+$DOCKER_COMPOSE exec -T -e V="$(sed_escape_repl "$RESOLVED_STATE" '/')" tak bash -c 'sed -i -E "s/^STATE=.*/STATE=\"$V\"/" /opt/tak/certs/cert-metadata.sh'
+$DOCKER_COMPOSE exec -T -e V="$(sed_escape_repl "$RESOLVED_CITY" '/')" tak bash -c 'sed -i -E "s/^CITY=.*/CITY=\"$V\"/" /opt/tak/certs/cert-metadata.sh'
+$DOCKER_COMPOSE exec -T -e V="$(sed_escape_repl "$RESOLVED_CAPASS" '/')" tak bash -c 'sed -i -E "s/^CAPASS=.*/CAPASS=\"$V\"/" /opt/tak/certs/cert-metadata.sh'
+$DOCKER_COMPOSE exec -T -e V="$(sed_escape_repl "$RESOLVED_PASS" '/')" tak bash -c 'sed -i -E "s/^PASS=.*/PASS=\"$V\"/" /opt/tak/certs/cert-metadata.sh'
 
 # restart the db container so it (re)creates martiuser using the new password from CoreConfig.xml and cert-metadata.sh.
 # The tak container will then pick up the new password on its next restart.
@@ -228,8 +239,8 @@ if [ "$SERVER_ADDRESS" = "localhost" ]; then
   echo "SERVER_ADDRESS not set (usage: ./setup.sh <host-or-ip>) - leaving urladd/webBaseUrl as localhost."
 else
   echo "Setting urladd/webBaseUrl host to $SERVER_ADDRESS..."
-  $DOCKER_COMPOSE exec -T -e V="$SERVER_ADDRESS" tak bash -c 'sed -i -E "s#(<urladd host=\"http://)[^:\"]+(:)#\1$V\2#" /opt/tak/CoreConfig.xml'
-  $DOCKER_COMPOSE exec -T -e V="$SERVER_ADDRESS" tak bash -c 'sed -i -E "s#(webBaseUrl=\"https://)[^:\"]+(:)#\1$V\2#" /opt/tak/CoreConfig.xml'
+  $DOCKER_COMPOSE exec -T -e V="$(sed_escape_repl "$SERVER_ADDRESS" '#')" tak bash -c 'sed -i -E "s#(<urladd host=\"http://)[^:\"]+(:)#\1$V\2#" /opt/tak/CoreConfig.xml'
+  $DOCKER_COMPOSE exec -T -e V="$(sed_escape_repl "$SERVER_ADDRESS" '#')" tak bash -c 'sed -i -E "s#(webBaseUrl=\"https://)[^:\"]+(:)#\1$V\2#" /opt/tak/CoreConfig.xml'
   restart_tak_and_wait "api messaging"
 fi
 
