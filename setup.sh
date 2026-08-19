@@ -155,7 +155,7 @@ if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
 fi
 
 echo "Stopping and removing containers..."
-docker compose down
+$DOCKER_COMPOSE down
 
 echo "Removing docker files and tak files..."
 docker run --rm -v "$(pwd):/workspace" -w /workspace busybox rm -rf .runtime_do_not_edit certs
