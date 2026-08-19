@@ -155,11 +155,8 @@ generate_password() {
 # so values from .env or CLI args (passwords, cert metadata, server address) can't break
 # or hijack the sed command even if they contain backslashes, ampersands, or the delimiter.
 sed_escape_repl() {
-  local s="$1" delim="${2:-/}"
-  s="${s//\\/\\\\}"
-  s="${s//$delim/\\$delim}"
-  s="${s//&/\\&}"
-  printf '%s' "$s"
+  local val="$1" delim="${2:-/}"
+  printf '%s' "$val" | sed -e 's/[\&]/\\&/g' -e "s/[$delim]/\\\\&/g"
 }
 
 # reset state as needed
