@@ -1,3 +1,5 @@
+name: services-tak
+
 services:
   db:
     build:
@@ -13,6 +15,7 @@ services:
         aliases:
           - tak-database
     restart: unless-stopped
+
   tak:
     build:
       context: .
@@ -33,5 +36,6 @@ services:
     depends_on:
       - db
     restart: unless-stopped
+
 networks:
   tak:

@@ -1,6 +1,11 @@
 #!/bin/bash
 set -e
-[ -f ./.env ] && source ./.env
+
+if [ -f ./.env ]; then
+  set -a
+  source ./.env
+  set +a
+fi
 
 # Optional: the address clients/browsers will actually use to reach this server
 # (public IP, private IP, or DNS name). TAK Server auto-detects its own Docker
@@ -116,7 +121,7 @@ generate_password() {
   local upper='ABCDEFGHIJKLMNOPQRSTUVWXYZ'
   local lower='abcdefghijklmnopqrstuvwxyz'
   local digit='0123456789'
-  local special='!@#$%^&*()_+=;:,.<>?'
+  local special='_.~+-'
   local all="${upper}${lower}${digit}${special}"
 
   local password=""
@@ -146,6 +151,14 @@ generate_password() {
   echo "$password"
 }
 
+# Escapes $1 for safe use as sed replacement (RHS) text with delimiter $2 (default '/'),
+# so values from .env or CLI args (passwords, cert metadata, server address) can't break
+# or hijack the sed command even if they contain backslashes, ampersands, or the delimiter.
+sed_escape_repl() {
+  local val="$1" delim="${2:-/}"
+  printf '%s' "$val" | sed -e 's/[\&]/\\&/g' -e "s/[$delim]/\\\\&/g"
+}
+
 # reset state as needed
 echo "This will reset the tak server to a clean state. If you have any existing data, it will be lost."
 read -p "Are you sure you want to continue? (y/N): " confirm
@@ -155,7 +168,7 @@ if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
 fi
 
 echo "Stopping and removing containers..."
-docker compose down
+$DOCKER_COMPOSE down
 
 echo "Removing docker files and tak files..."
 docker run --rm -v "$(pwd):/workspace" -w /workspace busybox rm -rf .runtime_do_not_edit certs
@@ -172,17 +185,25 @@ wait_for_core_config
 MARTI_PASSWORD="${DB_USER_PASSWORD:-$(generate_password 15)}"
 ADMIN_PASSWORD="${ADMIN_USER_PASSWORD:-$(generate_password 15)}"
 
-# set martiuser password in tak/CoreConfig.xml
-$DOCKER_COMPOSE exec tak bash -c "sed -i 's/password=\"\"/password=\"$MARTI_PASSWORD\"/g' /opt/tak/CoreConfig.xml"
+RESOLVED_COUNTRY="${COUNTRY:-US}"
+RESOLVED_ORGANIZATION="${ORGANIZATION:-TAK}"
+RESOLVED_ORGANIZATIONAL_UNIT="${ORGANIZATIONAL_UNIT:-TAK}"
+RESOLVED_STATE="${STATE:-VA}"
+RESOLVED_CITY="${CITY:-Fort Belvoir}"
+RESOLVED_CAPASS="${CAPASS:-atakatak}"
+RESOLVED_PASS="${PASS:-atakatak}"
 
-# update cert-metadata.sh with configured values. Fallback to US if variable not set.
-$DOCKER_COMPOSE exec tak bash -c "sed -i -E 's/^COUNTRY=.*/COUNTRY=\"${COUNTRY:-US}\"/' /opt/tak/certs/cert-metadata.sh"
-$DOCKER_COMPOSE exec tak bash -c "sed -i -E 's/^ORGANIZATION=.*/ORGANIZATION=\"${ORGANIZATION:-TAK}\"/' /opt/tak/certs/cert-metadata.sh"
-$DOCKER_COMPOSE exec tak bash -c "sed -i -E 's/^ORGANIZATIONAL_UNIT=.*/ORGANIZATIONAL_UNIT=\"${ORGANIZATIONAL_UNIT:-TAK}\"/' /opt/tak/certs/cert-metadata.sh"
-$DOCKER_COMPOSE exec tak bash -c "sed -i -E 's/^STATE=.*/STATE=\"${STATE:-VA}\"/' /opt/tak/certs/cert-metadata.sh"
-$DOCKER_COMPOSE exec tak bash -c "sed -i -E 's/^CITY=.*/CITY=\"${CITY:-Fort Belvoir}\"/' /opt/tak/certs/cert-metadata.sh"
-$DOCKER_COMPOSE exec tak bash -c "sed -i -E 's/^CAPASS=.*/CAPASS=\"${CAPASS:-atakatak}\"/' /opt/tak/certs/cert-metadata.sh"
-$DOCKER_COMPOSE exec tak bash -c "sed -i -E 's/^PASS=.*/PASS=\"${PASS:-atakatak}\"/' /opt/tak/certs/cert-metadata.sh"
+# set martiuser password in tak/CoreConfig.xml
+$DOCKER_COMPOSE exec -T -e MARTI_PASSWORD="$(sed_escape_repl "$MARTI_PASSWORD" '/')" tak bash -c 'sed -i "s/password=\"\"/password=\"$MARTI_PASSWORD\"/g" /opt/tak/CoreConfig.xml'
+
+# update cert-metadata.sh with configured values
+$DOCKER_COMPOSE exec -T -e V="$(sed_escape_repl "$RESOLVED_COUNTRY" '/')" tak bash -c 'sed -i -E "s/^COUNTRY=.*/COUNTRY=\"$V\"/" /opt/tak/certs/cert-metadata.sh'
+$DOCKER_COMPOSE exec -T -e V="$(sed_escape_repl "$RESOLVED_ORGANIZATION" '/')" tak bash -c 'sed -i -E "s/^ORGANIZATION=.*/ORGANIZATION=\"$V\"/" /opt/tak/certs/cert-metadata.sh'
+$DOCKER_COMPOSE exec -T -e V="$(sed_escape_repl "$RESOLVED_ORGANIZATIONAL_UNIT" '/')" tak bash -c 'sed -i -E "s/^ORGANIZATIONAL_UNIT=.*/ORGANIZATIONAL_UNIT=\"$V\"/" /opt/tak/certs/cert-metadata.sh'
+$DOCKER_COMPOSE exec -T -e V="$(sed_escape_repl "$RESOLVED_STATE" '/')" tak bash -c 'sed -i -E "s/^STATE=.*/STATE=\"$V\"/" /opt/tak/certs/cert-metadata.sh'
+$DOCKER_COMPOSE exec -T -e V="$(sed_escape_repl "$RESOLVED_CITY" '/')" tak bash -c 'sed -i -E "s/^CITY=.*/CITY=\"$V\"/" /opt/tak/certs/cert-metadata.sh'
+$DOCKER_COMPOSE exec -T -e V="$(sed_escape_repl "$RESOLVED_CAPASS" '/')" tak bash -c 'sed -i -E "s/^CAPASS=.*/CAPASS=\"$V\"/" /opt/tak/certs/cert-metadata.sh'
+$DOCKER_COMPOSE exec -T -e V="$(sed_escape_repl "$RESOLVED_PASS" '/')" tak bash -c 'sed -i -E "s/^PASS=.*/PASS=\"$V\"/" /opt/tak/certs/cert-metadata.sh'
 
 # restart the db container so it (re)creates martiuser using the new password from CoreConfig.xml and cert-metadata.sh.
 # The tak container will then pick up the new password on its next restart.
@@ -196,17 +217,18 @@ $DOCKER_COMPOSE restart tak
 wait_for_container_shell
 
 # create certs
-$DOCKER_COMPOSE exec tak bash -c "cd /opt/tak/certs && ./makeRootCa.sh --ca-name CRFtakserver"
-$DOCKER_COMPOSE exec tak bash -c "cd /opt/tak/certs && ./makeCert.sh server takserver"
-$DOCKER_COMPOSE exec tak bash -c "cd /opt/tak/certs && ./makeCert.sh client admin"
+$DOCKER_COMPOSE exec -T tak bash -c "cd /opt/tak/certs && ./makeRootCa.sh --ca-name CRFtakserver"
+$DOCKER_COMPOSE exec -T tak bash -c "cd /opt/tak/certs && ./makeCert.sh server takserver"
+$DOCKER_COMPOSE exec -T tak bash -c "cd /opt/tak/certs && ./makeCert.sh client admin"
 
 # restart the tak container so it picks up takserver.jks (JWT signing key depends on it)
 restart_tak_and_wait "api messaging"
 
 # config
-$DOCKER_COMPOSE exec tak bash -c "cd /opt/tak/ && java -jar /opt/tak/utils/UserManager.jar usermod -A -p $ADMIN_PASSWORD admin"
-$DOCKER_COMPOSE exec tak bash -c "cd /opt/tak/ && java -jar utils/UserManager.jar certmod -A certs/files/admin.pem"
-$DOCKER_COMPOSE exec tak bash -c "java -jar /opt/tak/db-utils/SchemaManager.jar upgrade"
+$DOCKER_COMPOSE exec -T -e ADMIN_PASSWORD="$ADMIN_PASSWORD" tak bash -c \
+  'cd /opt/tak/ && java -jar /opt/tak/utils/UserManager.jar usermod -A -p "$ADMIN_PASSWORD" admin'
+$DOCKER_COMPOSE exec -T tak bash -c "cd /opt/tak/ && java -jar utils/UserManager.jar certmod -A certs/files/admin.pem"
+$DOCKER_COMPOSE exec -T tak bash -c "java -jar /opt/tak/db-utils/SchemaManager.jar upgrade"
 
 # point the auto-detected urladd/federation URLs at the address clients will actually
 # use, instead of the Docker-internal bridge IP TAK Server picked on first boot
@@ -214,8 +236,8 @@ if [ "$SERVER_ADDRESS" = "localhost" ]; then
   echo "SERVER_ADDRESS not set (usage: ./setup.sh <host-or-ip>) - leaving urladd/webBaseUrl as localhost."
 else
   echo "Setting urladd/webBaseUrl host to $SERVER_ADDRESS..."
-  $DOCKER_COMPOSE exec tak bash -c "sed -i -E 's#(<urladd host=\"http://)[^:\"]+(:)#\1$SERVER_ADDRESS\2#' /opt/tak/CoreConfig.xml"
-  $DOCKER_COMPOSE exec tak bash -c "sed -i -E 's#(webBaseUrl=\"https://)[^:\"]+(:)#\1$SERVER_ADDRESS\2#' /opt/tak/CoreConfig.xml"
+  $DOCKER_COMPOSE exec -T -e V="$(sed_escape_repl "$SERVER_ADDRESS" '#')" tak bash -c 'sed -i -E "s#(<urladd host=\"http://)[^:\"]+(:)#\1$V\2#" /opt/tak/CoreConfig.xml'
+  $DOCKER_COMPOSE exec -T -e V="$(sed_escape_repl "$SERVER_ADDRESS" '#')" tak bash -c 'sed -i -E "s#(webBaseUrl=\"https://)[^:\"]+(:)#\1$V\2#" /opt/tak/CoreConfig.xml'
   restart_tak_and_wait "api messaging"
 fi
 
